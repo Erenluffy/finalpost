@@ -7,8 +7,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Bot credentials - get from environment variables
-API_ID = '25956970'
-API_HASH = '5fb73e6994d62ba1a7b8009991dd74b6'
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAG5jD89VW5xEo9qXT8J0OsB-byL5aJTqZM")
 
 # Logging configuration
@@ -156,9 +154,9 @@ Make sure your message includes:
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
 
-    def run_polling(self):
-        """Run the bot in polling mode (for development)"""
-        logger.info("🤖 Anime Formatter Bot is starting in polling mode...")
+    def run(self):
+        """Run the bot in polling mode"""
+        logger.info("🤖 Anime Formatter Bot is starting...")
         try:
             self.application.run_polling(
                 allowed_updates=Update.ALL_TYPES,
@@ -168,87 +166,15 @@ Make sure your message includes:
             logger.error(f"Failed to start bot: {str(e)}")
             raise
 
-    async def run_webhook(self):
-        """Run the bot in webhook mode (for production)"""
-        logger.info("🤖 Anime Formatter Bot is starting in webhook mode...")
-        
-        # Get port from environment variable or default to 8000 for Koyeb
-        port = int(os.environ.get('PORT', 8000))
-        
-        # Set webhook URL - you'll need to set KOYEB_APP_URL in your environment variables
-        webhook_url = os.getenv('KOYEB_APP_URL', '')
-        if not webhook_url:
-            logger.error("KOYEB_APP_URL environment variable is not set")
-            return
-            
-        webhook_url = f"{webhook_url}/{BOT_TOKEN}"
-        
-        try:
-            # Set webhook
-            await self.application.bot.set_webhook(
-                url=webhook_url,
-                drop_pending_updates=True
-            )
-            
-            logger.info(f"Webhook set to: {webhook_url}")
-            
-            # Start the webhook server
-            await self.application.run_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path=BOT_TOKEN,
-                webhook_url=webhook_url,
-                drop_pending_updates=True
-            )
-        except Exception as e:
-            logger.error(f"Failed to start webhook: {str(e)}")
-            raise
-
-# For Koyeb deployment - create a simple HTTP server for health checks
-from aiohttp import web
-
-async def health_check(request):
-    return web.Response(text="Bot is running!")
-
-def create_health_check_app():
-    app = web.Application()
-    app.router.add_get('/health', health_check)
-    return app
-
-async def run_health_check_server():
-    """Run a simple health check server for Koyeb"""
-    app = create_health_check_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    # Use a different port for health checks (8080)
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    logger.info("Health check server started on port 8080")
-
-async def main():
-    # Check if we're running in production (Koyeb)
-    is_production = os.getenv('KOYEB_APP_URL') is not None
-    
-    bot = TelegramBot()
-    
-    if is_production:
-        # In production, run both webhook and health check server
-        import asyncio
-        await asyncio.gather(
-            bot.run_webhook(),
-            run_health_check_server()
-        )
-    else:
-        # In development, use polling
-        bot.run_polling()
-
-if __name__ == '__main__':
-    import asyncio
+def main():
     try:
-        asyncio.run(main())
+        bot = TelegramBot()
+        bot.run()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Bot crashed: {str(e)}")
         raise
+
+if __name__ == '__main__':
+    main()
