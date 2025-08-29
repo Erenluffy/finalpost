@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Bot credentials - get from environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAG5jD89VW5xEo9qXT8J0OsB-byL5aJTqZM")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
 
 # Logging configuration
 logging.basicConfig(
