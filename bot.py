@@ -68,7 +68,7 @@ class AnimeFormatter:
 
         return " ".join(result_lines[:max_lines])
 
-    def format_html(self, data):
+    def format_html(self, data, cover_url=None):
         synopsis = self.truncate_synopsis(data.get('synopsis', ''))
         episodes = re.sub(r'[^\d]', '', data.get('episodes', '0')) or "0"
         formatted_output = f"""<b>{data.get('title', 'Unknown Title')}</b>
@@ -120,6 +120,12 @@ class AnimeSearch:
               genres
               description
               siteUrl
+              coverImage {
+                extraLarge
+                large
+                medium
+                color
+              }
             }
           }
         }
@@ -161,6 +167,12 @@ class AnimeSearch:
             genres
             description
             siteUrl
+            coverImage {
+              extraLarge
+              large
+              medium
+              color
+            }
           }
         }
         '''
@@ -209,6 +221,7 @@ The bot will format it with:
 • Truncated synopsis (max 5 lines)
 • Standard quality and audio options
 • Clean, professional layout
+• Cover image from AniList
 
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
         await update.message.reply_text(help_text, parse_mode='HTML', disable_web_page_preview=True)
@@ -356,12 +369,33 @@ Or simply send an anime title to search!"""
         
         # Format the anime data in the same style as manual input
         formatted_text = self._format_anime_from_api(anime)
+        cover_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
         
-        await query.edit_message_text(
-            formatted_text,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
+        try:
+            if cover_url:
+                # Send message with photo and formatted text
+                await query.message.reply_photo(
+                    photo=cover_url,
+                    caption=formatted_text,
+                    parse_mode='HTML'
+                )
+                # Delete the original search results message
+                await query.delete_message()
+            else:
+                # Fallback to text-only if no cover image
+                await query.edit_message_text(
+                    formatted_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+        except Exception as e:
+            logger.error(f"Error sending photo: {str(e)}")
+            # Fallback to text-only if photo fails
+            await query.edit_message_text(
+                formatted_text,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
 
     async def _handle_page_change(self, query, user_id, page_number):
         """Handle pagination in search results"""
@@ -440,6 +474,7 @@ Or simply send an anime title to search!"""
 <b>❃ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
 <b>❃ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
 <b>❃ Episodes :</b> {episodes}
+
 <b>‣ Synopsis :</b> {self.formatter.truncate_synopsis(description)}
 ────────────────────────
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
