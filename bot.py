@@ -71,16 +71,19 @@ class AnimeFormatter:
     def format_html(self, data, cover_url=None):
         synopsis = self.truncate_synopsis(data.get('synopsis', ''))
         episodes = re.sub(r'[^\d]', '', data.get('episodes', '0')) or "0"
+        
         formatted_output = f"""<b>{data.get('title', 'Unknown Title')}</b>
 ────────────────────────
 <b>❃ Season :</b> 1
 <b>❃ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
 <b>❃ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
 <b>❃ Episodes :</b> {episodes}
+
 <b>‣ Synopsis :</b> {synopsis}
 ────────────────────────
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
-        return formatted_output
+        
+        return formatted_output, cover_url
 
 class AnimeSearch:
     def __init__(self):
@@ -121,10 +124,8 @@ class AnimeSearch:
               description
               siteUrl
               coverImage {
-                extraLarge
                 large
-                medium
-                color
+                extraLarge
               }
             }
           }
@@ -168,10 +169,8 @@ class AnimeSearch:
             description
             siteUrl
             coverImage {
-              extraLarge
               large
-              medium
-              color
+              extraLarge
             }
           }
         }
@@ -221,7 +220,7 @@ The bot will format it with:
 • Truncated synopsis (max 5 lines)
 • Standard quality and audio options
 • Clean, professional layout
-• Cover image from AniList
+• Cover photos from AniList
 
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
         await update.message.reply_text(help_text, parse_mode='HTML', disable_web_page_preview=True)
@@ -233,7 +232,7 @@ The bot will format it with:
             logger.info(f"Processing manual format from user {update.effective_user.id}")
             anime_data = self.formatter.parse_anime_info(message_text)
             if anime_data:
-                formatted_text = self.formatter.format_html(anime_data)
+                formatted_text, _ = self.formatter.format_html(anime_data)
                 await update.message.reply_text(
                     formatted_text,
                     parse_mode='HTML',
@@ -368,29 +367,25 @@ Or simply send an anime title to search!"""
             return
         
         # Format the anime data in the same style as manual input
-        formatted_text = self._format_anime_from_api(anime)
-        cover_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
+        formatted_text, cover_url = self._format_anime_from_api(anime)
         
-        try:
-            if cover_url:
-                # Send message with photo and formatted text
+        # Send message with cover photo if available
+        if cover_url:
+            try:
                 await query.message.reply_photo(
                     photo=cover_url,
                     caption=formatted_text,
                     parse_mode='HTML'
                 )
-                # Delete the original search results message
-                await query.delete_message()
-            else:
-                # Fallback to text-only if no cover image
+                await query.edit_message_text("✅ Anime formatted successfully!")
+            except Exception as e:
+                logger.warning(f"Could not send photo, sending text only: {str(e)}")
                 await query.edit_message_text(
                     formatted_text,
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
-        except Exception as e:
-            logger.error(f"Error sending photo: {str(e)}")
-            # Fallback to text-only if photo fails
+        else:
             await query.edit_message_text(
                 formatted_text,
                 parse_mode='HTML',
@@ -446,6 +441,11 @@ Or simply send an anime title to search!"""
         description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
         description = description.replace('\n', ' ').strip()
         
+        # Get cover image URL
+        cover_url = None
+        if anime.get("coverImage"):
+            cover_url = anime["coverImage"].get("extraLarge") or anime["coverImage"].get("large")
+        
         # Use the existing formatter to format the final output
         manual_format_text = f"""{title}
 
@@ -465,9 +465,9 @@ Or simply send an anime title to search!"""
         # Parse and format using existing formatter
         anime_data = self.formatter.parse_anime_info(manual_format_text)
         if anime_data:
-            return self.formatter.format_html(anime_data)
+            return self.formatter.format_html(anime_data, cover_url)
         else:
-            # Fallback format
+            # Fallback format with proper line gap
             return f"""<b>{title}</b>
 ────────────────────────
 <b>❃ Season :</b> 1
@@ -477,7 +477,7 @@ Or simply send an anime title to search!"""
 
 <b>‣ Synopsis :</b> {self.formatter.truncate_synopsis(description)}
 ────────────────────────
-<b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
+<b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>""", cover_url
 
     def _format_date(self, date_dict):
         """Format date from API response"""
