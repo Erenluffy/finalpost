@@ -1,17 +1,13 @@
-# -*- coding: utf-8 -*-
+make this also with pyrogram# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 import logging
 import re
 import os
 import requests
-import asyncio
-from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
-from pyrogram.errors import FloodWait, RPCError
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 # Bot credentials - get from environment variables
-API_ID = int(os.getenv("API_ID", "22922577"))
-API_HASH = os.getenv("API_HASH", "ff5513f0b7e10b92a940bd107e1ac32a")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
 
 # Logging configuration
@@ -189,28 +185,16 @@ class AnimeSearch:
             logger.error(f"Error getting anime by ID: {str(e)}")
             return None
 
-class AnimeBot:
+class TelegramBot:
     def __init__(self):
         self.formatter = AnimeFormatter()
         self.anime_search = AnimeSearch()
         self.user_sessions = {}  # Store user search sessions
-        
-        # Initialize Pyrogram client
-        self.app = Client(
-            "anime_formatter_bot",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            bot_token=BOT_TOKEN,
-            in_memory=True
-        )
-        
+        self.application = Application.builder().token(BOT_TOKEN).build()
         self.setup_handlers()
 
-    def setup_handlers(self):
-        # Command handlers
-        @self.app.on_message(filters.command("start") & filters.private)
-        async def start_command(client, message: Message):
-            help_text = """🎌 <b>Anime Formatter Bot</b> 🎌
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        help_text = """\U0001F38C <b>Anime Formatter Bot</b> \U0001F38C
 
 Send anime information in this exact format:
 
@@ -239,21 +223,24 @@ The bot will format it with:
 • Cover photos from AniList
 
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
-            await message.reply_text(help_text)
+        await update.message.reply_text(help_text, parse_mode='HTML', disable_web_page_preview=True)
 
-        # Manual format handler
-        @self.app.on_message(filters.text & filters.private & filters.regex(r'‣\s*Genres\s*:'))
-        async def handle_manual_format(client, message: Message):
-            try:
-                message_text = message.text
-                logger.info(f"Processing manual format from user {message.from_user.id}")
-                anime_data = self.formatter.parse_anime_info(message_text)
-                if anime_data:
-                    formatted_text, _ = self.formatter.format_html(anime_data)
-                    await message.reply_text(formatted_text)
-                    logger.info("Successfully formatted and sent anime information")
-                else:
-                    error_message = """❌ <b>Invalid Format</b>
+    async def handle_manual_format(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle manual anime formatting"""
+        try:
+            message_text = update.message.text
+            logger.info(f"Processing manual format from user {update.effective_user.id}")
+            anime_data = self.formatter.parse_anime_info(message_text)
+            if anime_data:
+                formatted_text, _ = self.formatter.format_html(anime_data)
+                await update.message.reply_text(
+                    formatted_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                logger.info("Successfully formatted and sent anime information")
+            else:
+                error_message = """\u274C <b>Invalid Format</b>
 
 Please use the correct format. Send /start to see the example format.
 
@@ -264,79 +251,53 @@ Make sure your message includes:
 • Proper line breaks between sections
 
 Or simply send an anime title to search!"""
-                    await message.reply_text(error_message)
-                    logger.warning("Invalid format received")
-            except Exception as e:
-                logger.exception(f"Error processing message: {str(e)}")
-                await message.reply_text(
-                    "❌ <b>Error occurred</b>\n\nSomething went wrong while processing your message. Please try again with the correct format.\n\nUse /start to see the example."
-                )
+                await update.message.reply_text(error_message, parse_mode='HTML')
+                logger.warning("Invalid format received")
+        except Exception as e:
+            logger.exception(f"Error processing message: {str(e)}")
+            await update.message.reply_text(
+                "\u274C <b>Error occurred</b>\n\nSomething went wrong while processing your message. Please try again with the correct format.\n\nUse /start to see the example.",
+                parse_mode='HTML'
+            )
 
-        # Search handler
-        @self.app.on_message(filters.text & filters.private & ~filters.command & ~filters.regex(r'‣\s*Genres\s*:'))
-        async def handle_search(client, message: Message):
-            try:
-                query = message.text.strip()
-                user_id = message.from_user.id
-                
-                if len(query) < 3:
-                    await message.reply_text("❌ Please enter at least 3 characters to search.")
-                    return
-                
-                # Search anime
-                result = self.anime_search.search_anime(query, page=1)
-                
-                if not result or not result.get("media"):
-                    await message.reply_text("❌ No anime found with that name.")
-                    return
-                
-                # Store search session
-                self.user_sessions[user_id] = {
-                    "query": query,
-                    "current_page": 1,
-                    "total_pages": result["pageInfo"]["lastPage"],
-                    "results": result["media"]
-                }
-                
-                # Create keyboard with results
-                keyboard = self._create_search_keyboard(result["media"], user_id, 1, result["pageInfo"])
-                
-                await message.reply_text(
-                    f"🎞 Found {len(result['media'])} results for '{query}':\n\nSelect an anime:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                
-            except Exception as e:
-                logger.exception(f"Error handling search: {str(e)}")
-                await message.reply_text("❌ Error searching for anime. Please try again.")
-
-        # Callback query handler
-        @self.app.on_callback_query()
-        async def handle_callback_query(client, callback_query: CallbackQuery):
-            data = callback_query.data
-            user_id = callback_query.from_user.id
+    async def handle_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle anime search requests"""
+        try:
+            query = update.message.text.strip()
+            user_id = update.effective_user.id
             
-            try:
-                if data.startswith("select_"):
-                    # User selected an anime
-                    anime_id = int(data.split("_")[1])
-                    await self._handle_anime_selection(callback_query, anime_id)
-                    
-                elif data.startswith("page_"):
-                    # User wants to change page
-                    parts = data.split("_")
-                    target_user_id = int(parts[1])
-                    page_number = int(parts[2])
-                    
-                    if user_id != target_user_id:
-                        await callback_query.answer("This search session is not yours.", show_alert=True)
-                        return
-                    
-                    await self._handle_page_change(callback_query, user_id, page_number)
-                    
-            except Exception as e:
-                logger.exception(f"Error handling callback: {str(e)}")
-                await callback_query.answer("Error processing your request.", show_alert=True)
+            if len(query) < 3:
+                await update.message.reply_text("❌ Please enter at least 3 characters to search.")
+                return
+            
+            # Search anime
+            result = self.anime_search.search_anime(query, page=1)
+            
+            if not result or not result.get("media"):
+                await update.message.reply_text("❌ No anime found with that name.")
+                return
+            
+            # Store search session
+            self.user_sessions[user_id] = {
+                "query": query,
+                "current_page": 1,
+                "total_pages": result["pageInfo"]["lastPage"],
+                "results": result["media"]
+            }
+            
+            # Create keyboard with results
+            keyboard = self._create_search_keyboard(result["media"], user_id, 1, result["pageInfo"])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"🎞 Found {len(result['media'])} results for '{query}':\n\nSelect an anime:",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.exception(f"Error handling search: {str(e)}")
+            await update.message.reply_text("❌ Error searching for anime. Please try again.")
 
     def _create_search_keyboard(self, results, user_id, current_page, page_info):
         """Create inline keyboard for search results with pagination"""
@@ -367,12 +328,42 @@ Or simply send an anime title to search!"""
         
         return keyboard
 
-    async def _handle_anime_selection(self, callback_query: CallbackQuery, anime_id: int):
+    async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle inline keyboard button presses"""
+        query = update.callback_query
+        await query.answer()
+        
+        data = query.data
+        user_id = query.from_user.id
+        
+        try:
+            if data.startswith("select_"):
+                # User selected an anime
+                anime_id = int(data.split("_")[1])
+                await self._handle_anime_selection(query, anime_id)
+                
+            elif data.startswith("page_"):
+                # User wants to change page
+                parts = data.split("_")
+                target_user_id = int(parts[1])
+                page_number = int(parts[2])
+                
+                if user_id != target_user_id:
+                    await query.edit_message_text("❌ This search session is not yours.")
+                    return
+                
+                await self._handle_page_change(query, user_id, page_number)
+                
+        except Exception as e:
+            logger.exception(f"Error handling callback: {str(e)}")
+            await query.edit_message_text("❌ Error processing your request.")
+
+    async def _handle_anime_selection(self, query, anime_id):
         """Handle when user selects an anime from search results"""
         anime = self.anime_search.get_anime_by_id(anime_id)
         
         if not anime:
-            await callback_query.message.edit_text("❌ Couldn't load anime details.")
+            await query.edit_message_text("❌ Couldn't load anime details.")
             return
         
         # Format the anime data in the same style as manual input
@@ -381,29 +372,38 @@ Or simply send an anime title to search!"""
         # Send message with cover photo if available
         if cover_url:
             try:
-                await callback_query.message.reply_photo(
+                await query.message.reply_photo(
                     photo=cover_url,
-                    caption=formatted_text
+                    caption=formatted_text,
+                    parse_mode='HTML'
                 )
-                await callback_query.message.edit_text("✅ Anime formatted successfully!")
+                await query.edit_message_text("✅ Anime formatted successfully!")
             except Exception as e:
                 logger.warning(f"Could not send photo, sending text only: {str(e)}")
-                await callback_query.message.edit_text(formatted_text)
+                await query.edit_message_text(
+                    formatted_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
         else:
-            await callback_query.message.edit_text(formatted_text)
+            await query.edit_message_text(
+                formatted_text,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
 
-    async def _handle_page_change(self, callback_query: CallbackQuery, user_id: int, page_number: int):
+    async def _handle_page_change(self, query, user_id, page_number):
         """Handle pagination in search results"""
         session = self.user_sessions.get(user_id)
         if not session:
-            await callback_query.message.edit_text("❌ Search session expired. Please search again.")
+            await query.edit_message_text("❌ Search session expired. Please search again.")
             return
         
         # Search for the new page
         result = self.anime_search.search_anime(session["query"], page=page_number)
         
         if not result or not result.get("media"):
-            await callback_query.message.edit_text("❌ No results found for this page.")
+            await query.edit_message_text("❌ No results found for this page.")
             return
         
         # Update session
@@ -413,10 +413,12 @@ Or simply send an anime title to search!"""
         
         # Create new keyboard
         keyboard = self._create_search_keyboard(result["media"], user_id, page_number, result["pageInfo"])
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await callback_query.message.edit_text(
+        await query.edit_message_text(
             f"🎞 Found results for '{session['query']}':\n\nSelect an anime:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=reply_markup,
+            parse_mode='HTML'
         )
 
     def _format_anime_from_api(self, anime):
@@ -488,23 +490,47 @@ Or simply send an anime title to search!"""
         
         return f"{year}-{month:02d}-{day:02d}"
 
-    async def run(self):
-        """Run the bot"""
+    def setup_handlers(self):
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        
+        # Add handler for manual formatting (specific pattern)
+        self.application.add_handler(
+            MessageHandler(
+                filters.TEXT & 
+                filters.Regex(r'‣\s*Genres\s*:') &  # Match the manual format pattern
+                ~filters.COMMAND, 
+                self.handle_manual_format
+            )
+        )
+        
+        # Add handler for search queries (other text messages)
+        self.application.add_handler(
+            MessageHandler(
+                filters.TEXT & 
+                ~filters.Regex(r'‣\s*Genres\s*:') &  # Not manual format
+                ~filters.COMMAND, 
+                self.handle_search
+            )
+        )
+        
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
+
+    def run(self):
+        """Run the bot in polling mode"""
         logger.info("🤖 Anime Formatter Bot is starting...")
         try:
-            await self.app.start()
-            logger.info("Bot started successfully!")
-            await idle()
+            self.application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
         except Exception as e:
             logger.error(f"Failed to start bot: {str(e)}")
             raise
-        finally:
-            await self.app.stop()
 
 def main():
     try:
-        bot = AnimeBot()
-        asyncio.run(bot.run())
+        bot = TelegramBot()
+        bot.run()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
@@ -512,4 +538,4 @@ def main():
         raise
 
 if __name__ == '__main__':
-    main()
+    main() 
