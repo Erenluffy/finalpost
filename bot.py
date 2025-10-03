@@ -1,4 +1,5 @@
-make this also with pyrogram# -*- coding: utf-8 -*-
+
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 import logging
 import re
@@ -38,7 +39,7 @@ class AnimeFormatter:
         match = self.input_pattern.search(text)
         if not match:
             return None
-        
+
         data = {k: (v.strip() if v else "") for k, v in match.groupdict().items()}
         return data
 
@@ -88,7 +89,7 @@ class AnimeFormatter:
 class AnimeSearch:
     def __init__(self):
         self.url = "https://graphql.anilist.co"
-    
+
     def search_anime(self, query: str, page: int = 1, per_page: int = 10):
         query_str = '''
         query ($search: String, $page: Int, $perPage: Int) {
@@ -124,8 +125,10 @@ class AnimeSearch:
               description
               siteUrl
               coverImage {
+
                 large
                 extraLarge
+
               }
             }
           }
@@ -169,8 +172,10 @@ class AnimeSearch:
             description
             siteUrl
             coverImage {
+
               large
               extraLarge
+
             }
           }
         }
@@ -265,18 +270,18 @@ Or simply send an anime title to search!"""
         try:
             query = update.message.text.strip()
             user_id = update.effective_user.id
-            
+
             if len(query) < 3:
                 await update.message.reply_text("❌ Please enter at least 3 characters to search.")
                 return
-            
+
             # Search anime
             result = self.anime_search.search_anime(query, page=1)
-            
+
             if not result or not result.get("media"):
                 await update.message.reply_text("❌ No anime found with that name.")
                 return
-            
+
             # Store search session
             self.user_sessions[user_id] = {
                 "query": query,
@@ -284,17 +289,17 @@ Or simply send an anime title to search!"""
                 "total_pages": result["pageInfo"]["lastPage"],
                 "results": result["media"]
             }
-            
+
             # Create keyboard with results
             keyboard = self._create_search_keyboard(result["media"], user_id, 1, result["pageInfo"])
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             await update.message.reply_text(
                 f"🎞 Found {len(result['media'])} results for '{query}':\n\nSelect an anime:",
                 reply_markup=reply_markup,
                 parse_mode='HTML'
             )
-            
+
         except Exception as e:
             logger.exception(f"Error handling search: {str(e)}")
             await update.message.reply_text("❌ Error searching for anime. Please try again.")
@@ -302,7 +307,7 @@ Or simply send an anime title to search!"""
     def _create_search_keyboard(self, results, user_id, current_page, page_info):
         """Create inline keyboard for search results with pagination"""
         keyboard = []
-        
+
         # Add anime buttons
         for anime in results:
             title = anime["title"]["english"] or anime["title"]["romaji"]
@@ -312,48 +317,48 @@ Or simply send an anime title to search!"""
             if len(label) > 50:
                 label = label[:47] + "..."
             keyboard.append([InlineKeyboardButton(label, callback_data=f"select_{anime['id']}")])
-        
+
         # Add pagination buttons
         pagination_row = []
         if current_page > 1:
             pagination_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"page_{user_id}_{current_page-1}"))
-        
+
         pagination_row.append(InlineKeyboardButton(f"Page {current_page}/{page_info['lastPage']}", callback_data="current_page"))
-        
+
         if page_info.get("hasNextPage", False):
             pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{user_id}_{current_page+1}"))
-        
+
         if pagination_row:
             keyboard.append(pagination_row)
-        
+
         return keyboard
 
     async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle inline keyboard button presses"""
         query = update.callback_query
         await query.answer()
-        
+
         data = query.data
         user_id = query.from_user.id
-        
+
         try:
             if data.startswith("select_"):
                 # User selected an anime
                 anime_id = int(data.split("_")[1])
                 await self._handle_anime_selection(query, anime_id)
-                
+
             elif data.startswith("page_"):
                 # User wants to change page
                 parts = data.split("_")
                 target_user_id = int(parts[1])
                 page_number = int(parts[2])
-                
+
                 if user_id != target_user_id:
                     await query.edit_message_text("❌ This search session is not yours.")
                     return
-                
+
                 await self._handle_page_change(query, user_id, page_number)
-                
+
         except Exception as e:
             logger.exception(f"Error handling callback: {str(e)}")
             await query.edit_message_text("❌ Error processing your request.")
@@ -361,14 +366,15 @@ Or simply send an anime title to search!"""
     async def _handle_anime_selection(self, query, anime_id):
         """Handle when user selects an anime from search results"""
         anime = self.anime_search.get_anime_by_id(anime_id)
-        
+
         if not anime:
             await query.edit_message_text("❌ Couldn't load anime details.")
             return
-        
+
         # Format the anime data in the same style as manual input
         formatted_text, cover_url = self._format_anime_from_api(anime)
-        
+
+
         # Send message with cover photo if available
         if cover_url:
             try:
@@ -380,12 +386,15 @@ Or simply send an anime title to search!"""
                 await query.edit_message_text("✅ Anime formatted successfully!")
             except Exception as e:
                 logger.warning(f"Could not send photo, sending text only: {str(e)}")
+
                 await query.edit_message_text(
                     formatted_text,
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
         else:
+
+
             await query.edit_message_text(
                 formatted_text,
                 parse_mode='HTML',
@@ -398,23 +407,23 @@ Or simply send an anime title to search!"""
         if not session:
             await query.edit_message_text("❌ Search session expired. Please search again.")
             return
-        
+
         # Search for the new page
         result = self.anime_search.search_anime(session["query"], page=page_number)
-        
+
         if not result or not result.get("media"):
             await query.edit_message_text("❌ No results found for this page.")
             return
-        
+
         # Update session
         session["current_page"] = page_number
         session["results"] = result["media"]
         self.user_sessions[user_id] = session
-        
+
         # Create new keyboard
         keyboard = self._create_search_keyboard(result["media"], user_id, page_number, result["pageInfo"])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await query.edit_message_text(
             f"🎞 Found results for '{session['query']}':\n\nSelect an anime:",
             reply_markup=reply_markup,
@@ -428,19 +437,19 @@ Or simply send an anime title to search!"""
         anime_type = anime.get("format", "Unknown")
         rating = f"{anime.get('averageScore', 'N/A')}%" if anime.get('averageScore') else "N/A"
         status = anime.get("status", "Unknown").replace("_", " ").title()
-        
+
         # Format dates
         start_date = self._format_date(anime.get("startDate", {}))
         end_date = self._format_date(anime.get("endDate", {}))
-        
+
         runtime = f"{anime.get('duration', 'Unknown')} min" if anime.get('duration') else "Unknown"
         episodes = anime.get("episodes", "Unknown")
-        
+
         # Clean description
         description = anime.get("description", "No synopsis available.")
         description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
         description = description.replace('\n', ' ').strip()
-        
+
         # Get cover image URL
         cover_url = None
         if anime.get("coverImage"):
@@ -461,7 +470,7 @@ Or simply send an anime title to search!"""
 ‣ Synopsis : {description}
 
 (Source: AniList)"""
-        
+
         # Parse and format using existing formatter
         anime_data = self.formatter.parse_anime_info(manual_format_text)
         if anime_data:
@@ -483,16 +492,16 @@ Or simply send an anime title to search!"""
         """Format date from API response"""
         if not date_dict or not date_dict.get("year"):
             return "Unknown"
-        
+
         year = date_dict["year"]
         month = date_dict.get("month", 1)
         day = date_dict.get("day", 1)
-        
+
         return f"{year}-{month:02d}-{day:02d}"
 
     def setup_handlers(self):
         self.application.add_handler(CommandHandler("start", self.start_command))
-        
+
         # Add handler for manual formatting (specific pattern)
         self.application.add_handler(
             MessageHandler(
@@ -502,7 +511,7 @@ Or simply send an anime title to search!"""
                 self.handle_manual_format
             )
         )
-        
+
         # Add handler for search queries (other text messages)
         self.application.add_handler(
             MessageHandler(
@@ -512,7 +521,7 @@ Or simply send an anime title to search!"""
                 self.handle_search
             )
         )
-        
+
         self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
 
     def run(self):
@@ -538,4 +547,4 @@ def main():
         raise
 
 if __name__ == '__main__':
-    main() 
+    main()
