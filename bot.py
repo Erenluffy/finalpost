@@ -6,13 +6,13 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# WARNING: Hardcoding bot token in code is insecure!
-# Consider using environment variables for production
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
 
-GRAPHQL_API_URL = "https://graphql.anilist.co"  # Using official AniList GraphQL API
+# Restored your original API URL
+GRAPHQL_API_URL = "https://animmes2uapi.vercel.app/api/graphql"
 
-ANILIST_IMG_CDN = "https://s4.anilist.co/file/anilistcdn"
+# Restored your original AniList CDN
+ANILIST_IMG_CDN = "https://img.anili.st"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -67,7 +67,7 @@ class AnimeFormatter:
         if not text:
             return ""
         
-        # Small caps mapping
+        # Small caps mapping - RESTORED YOUR ORIGINAL
         small_caps_map = {
             'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ',
             'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ',
@@ -102,7 +102,7 @@ class AnimeFormatter:
         if len(synopsis) > max_chars:
             synopsis = synopsis[:max_chars].rstrip() + "..."
         
-        # Convert to small caps
+        # Convert to small caps - RESTORED iltac CONVERSION
         return self.convert_to_small_caps(synopsis)
 
     def format_html(self, data, cover_url=None, anime_id=None):
@@ -121,9 +121,9 @@ class AnimeFormatter:
 ────────────────────────
 💠 <b>Powered By</b> : @OtakusFlix"""
         
-        # If we have anime_id but no cover_url, generate one from AniList CDN
+        # RESTORED YOUR ORIGINAL COVER URL GENERATION
         if not cover_url and anime_id:
-            cover_url = f"{ANILIST_IMG_CDN}/media/anime/cover/medium/{anime_id}.jpg"
+            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
         
         return formatted_output, cover_url
 
@@ -169,6 +169,7 @@ class AnimeSearch:
 
     def search_anime(self, query: str, page: int = 1, per_page: int = 10):
         """Search anime using GraphQL API"""
+        # USING YOUR ORIGINAL GRAPHQL QUERY
         graphql_query = """
         query ($search: String, $page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -202,9 +203,7 @@ class AnimeSearch:
               genres
               description
               siteUrl
-              coverImage {
-                medium
-              }
+              # We only need the ID for cover image URL generation
             }
           }
         }
@@ -229,6 +228,7 @@ class AnimeSearch:
 
     def get_anime_by_id(self, anime_id: int):
         """Get anime details by ID using GraphQL API"""
+        # USING YOUR ORIGINAL GRAPHQL QUERY
         graphql_query = """
         query ($id: Int) {
           Media(id: $id, type: ANIME) {
@@ -255,11 +255,7 @@ class AnimeSearch:
             genres
             description
             siteUrl
-            coverImage {
-              medium
-              large
-              extraLarge
-            }
+            # We only need the ID for cover image URL generation
           }
         }
         """
@@ -530,14 +526,10 @@ Or simply send an anime title to search!"""
         
         episodes = str(anime.get("episodes", "—")) if anime.get("episodes") else "—"
 
-        # Get cover URL from API response
+        # USING YOUR ORIGINAL COVER URL GENERATION
         cover_url = None
-        if anime.get("coverImage"):
-            cover_url = anime["coverImage"].get("large") or anime["coverImage"].get("medium")
-        
-        # If no cover URL but have anime_id, generate one
-        if not cover_url and anime_id:
-            cover_url = f"{ANILIST_IMG_CDN}/media/anime/cover/large/{anime_id}.jpg"
+        if anime_id:
+            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
     
         # Use formatter to format
         manual_format_text = f"""{title}
@@ -559,7 +551,7 @@ Or simply send an anime title to search!"""
         if anime_data:
             return self.formatter.format_html(anime_data, cover_url, anime_id)
         else:
-            # Fallback format
+            # Fallback format with YOUR ORIGINAL iltac conversion
             synopsis = self.formatter.truncate_synopsis(description)
             return f"""<b>{title}</b>
 ────────────────────────
@@ -577,8 +569,8 @@ Or simply send an anime title to search!"""
             return "Unknown"
 
         year = date_dict["year"]
-        month = date_dict.get("month", 1) or 1
-        day = date_dict.get("day", 1) or 1
+        month = date_dict.get("month", 1)
+        day = date_dict.get("day", 1)
 
         return f"{year}-{month:02d}-{day:02d}"
 
