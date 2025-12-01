@@ -1,15 +1,21 @@
-
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 import logging
 import re
 import os
 import requests
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 # Bot credentials - get from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
+
+# Your personal AniList GraphQL API endpoint
+GRAPHQL_API_URL = "https://animmes2uapi.vercel.app/api/graphql"
+
+# AniList image CDN for cover images
+ANILIST_IMG_CDN = "https://img.anili.st"
 
 # Logging configuration
 logging.basicConfig(
@@ -69,29 +75,69 @@ class AnimeFormatter:
 
         return " ".join(result_lines[:max_lines])
 
-    def format_html(self, data, cover_url=None):
+    def format_html(self, data, cover_url=None, anime_id=None):
         synopsis = self.truncate_synopsis(data.get('synopsis', ''))
         episodes = re.sub(r'[^\d]', '', data.get('episodes', '0')) or "0"
         
         formatted_output = f"""<b>{data.get('title', 'Unknown Title')}</b>
 ────────────────────────
-<b>❃ Season :</b> 1
-<b>❃ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
-<b>❃ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
-<b>❃ Episodes :</b> {episodes}
-
-<b>‣ Synopsis :</b> {synopsis}
+<b>➤ Season :</b> 1
+<b>➤ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
+<b>➤ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
+<b>➤ Episodes :</b> {episodes}
+<blockquote expandable><b>‣ Synopsis :</b> {synopsis}</blockquote>
 ────────────────────────
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
+        
+        # If we have anime_id but no cover_url, generate one from AniList CDN
+        if not cover_url and anime_id:
+            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
         
         return formatted_output, cover_url
 
 class AnimeSearch:
     def __init__(self):
-        self.url = "https://graphql.anilist.co"
+        self.api_url = GRAPHQL_API_URL
+
+    def _execute_graphql_query(self, query, variables):
+        """Execute GraphQL query to the API"""
+        try:
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            payload = {
+                "query": query,
+                "variables": variables
+            }
+            
+            response = requests.post(
+                self.api_url,
+                json=payload,
+                headers=headers,
+                timeout=15
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"GraphQL API failed with status {response.status_code}: {response.text}")
+                return None
+            
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error during GraphQL query: {str(e)}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {str(e)} - Response: {response.text[:200]}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error in GraphQL query: {str(e)}")
+            return None
 
     def search_anime(self, query: str, page: int = 1, per_page: int = 10):
-        query_str = '''
+        """Search anime using GraphQL API"""
+        graphql_query = """
         query ($search: String, $page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
             pageInfo {
@@ -124,28 +170,32 @@ class AnimeSearch:
               genres
               description
               siteUrl
-              coverImage {
-
-                large
-                extraLarge
-
-              }
+              # We only need the ID for cover image URL generation
             }
           }
         }
-        '''
-        variables = {"search": query, "page": page, "perPage": per_page}
-        try:
-            response = requests.post(self.url, json={"query": query_str, "variables": variables}, timeout=10)
-            if response.status_code != 200:
-                return None
-            return response.json()["data"]["Page"]
-        except Exception as e:
-            logger.error(f"Error searching anime: {str(e)}")
+        """
+        
+        variables = {
+            "search": query,
+            "page": page,
+            "perPage": per_page
+        }
+        
+        result = self._execute_graphql_query(graphql_query, variables)
+        
+        if not result or "errors" in result:
+            logger.error(f"GraphQL query errors: {result.get('errors') if result else 'No result'}")
             return None
+            
+        if "data" in result and "Page" in result["data"]:
+            return result["data"]["Page"]
+        
+        return None
 
     def get_anime_by_id(self, anime_id: int):
-        query_str = '''
+        """Get anime details by ID using GraphQL API"""
+        graphql_query = """
         query ($id: Int) {
           Media(id: $id, type: ANIME) {
             id
@@ -171,24 +221,23 @@ class AnimeSearch:
             genres
             description
             siteUrl
-            coverImage {
-
-              large
-              extraLarge
-
-            }
+            # We only need the ID for cover image URL generation
           }
         }
-        '''
+        """
+        
         variables = {"id": anime_id}
-        try:
-            response = requests.post(self.url, json={"query": query_str, "variables": variables}, timeout=10)
-            if response.status_code != 200:
-                return None
-            return response.json()["data"]["Media"]
-        except Exception as e:
-            logger.error(f"Error getting anime by ID: {str(e)}")
+        
+        result = self._execute_graphql_query(graphql_query, variables)
+        
+        if not result or "errors" in result:
+            logger.error(f"GraphQL query errors for ID {anime_id}: {result.get('errors') if result else 'No result'}")
             return None
+            
+        if "data" in result and "Media" in result["data"]:
+            return result["data"]["Media"]
+        
+        return None
 
 class TelegramBot:
     def __init__(self):
@@ -275,7 +324,7 @@ Or simply send an anime title to search!"""
                 await update.message.reply_text("❌ Please enter at least 3 characters to search.")
                 return
 
-            # Search anime
+            # Search anime using GraphQL API
             result = self.anime_search.search_anime(query, page=1)
 
             if not result or not result.get("media"):
@@ -372,34 +421,44 @@ Or simply send an anime title to search!"""
             return
 
         # Format the anime data in the same style as manual input
-        formatted_text, cover_url = self._format_anime_from_api(anime)
-
+        formatted_text, cover_url = self._format_anime_from_api(anime, anime_id)
 
         # Send message with cover photo if available
         if cover_url:
             try:
-                await query.message.reply_photo(
-                    photo=cover_url,
-                    caption=formatted_text,
-                    parse_mode='HTML'
-                )
-                await query.edit_message_text("✅ Anime formatted successfully!")
+                # Test if the cover URL is accessible
+                test_response = requests.head(cover_url, timeout=5)
+                if test_response.status_code == 200:
+                    await query.message.reply_photo(
+                        photo=cover_url,
+                        caption=formatted_text,
+                        parse_mode='HTML'
+                    )
+                    await query.edit_message_text("✅ Anime formatted successfully!")
+                else:
+                    # If cover URL doesn't work, send text only
+                    logger.warning(f"Cover URL not accessible: {cover_url}")
+                    await query.message.reply_text(
+                        formatted_text,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
+                    await query.edit_message_text("✅ Anime formatted (cover image not available)")
             except Exception as e:
                 logger.warning(f"Could not send photo, sending text only: {str(e)}")
-
-                await query.edit_message_text(
+                await query.message.reply_text(
                     formatted_text,
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
+                await query.edit_message_text("✅ Anime formatted (without cover)")
         else:
-
-
-            await query.edit_message_text(
+            await query.message.reply_text(
                 formatted_text,
                 parse_mode='HTML',
                 disable_web_page_preview=True
             )
+            await query.edit_message_text("✅ Anime formatted (no cover available)")
 
     async def _handle_page_change(self, query, user_id, page_number):
         """Handle pagination in search results"""
@@ -430,7 +489,7 @@ Or simply send an anime title to search!"""
             parse_mode='HTML'
         )
 
-    def _format_anime_from_api(self, anime):
+    def _format_anime_from_api(self, anime, anime_id=None):
         """Format anime data from API into the desired format"""
         title = anime["title"]["english"] or anime["title"]["romaji"]
         genres = ", ".join(anime.get("genres", [])) if anime.get("genres") else "Unknown"
@@ -450,10 +509,10 @@ Or simply send an anime title to search!"""
         description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
         description = description.replace('\n', ' ').strip()
 
-        # Get cover image URL
+        # Generate cover URL from AniList CDN
         cover_url = None
-        if anime.get("coverImage"):
-            cover_url = anime["coverImage"].get("extraLarge") or anime["coverImage"].get("large")
+        if anime_id:
+            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
         
         # Use the existing formatter to format the final output
         manual_format_text = f"""{title}
@@ -474,17 +533,17 @@ Or simply send an anime title to search!"""
         # Parse and format using existing formatter
         anime_data = self.formatter.parse_anime_info(manual_format_text)
         if anime_data:
-            return self.formatter.format_html(anime_data, cover_url)
+            return self.formatter.format_html(anime_data, cover_url, anime_id)
         else:
-            # Fallback format with proper line gap
+            # Fallback format
+            synopsis = self.formatter.truncate_synopsis(description)
             return f"""<b>{title}</b>
 ────────────────────────
-<b>❃ Season :</b> 1
-<b>❃ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
-<b>❃ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
-<b>❃ Episodes :</b> {episodes}
-
-<b>‣ Synopsis :</b> {self.formatter.truncate_synopsis(description)}
+<b>➤ Season :</b> 1
+<b>➢ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
+<b>➤ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
+<b>➥ Episodes :</b> {episodes}
+<blockquote expandable><b>‣ Synopsis :</b> {synopsis}</blockquote>
 ────────────────────────
 <b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>""", cover_url
 
@@ -527,7 +586,16 @@ Or simply send an anime title to search!"""
     def run(self):
         """Run the bot in polling mode"""
         logger.info("🤖 Anime Formatter Bot is starting...")
+        logger.info(f"Using GraphQL API: {GRAPHQL_API_URL}")
+        logger.info(f"Using AniList CDN for cover images: {ANILIST_IMG_CDN}")
         try:
+            # Test API connection
+            test_result = self.anime_search.search_anime("naruto", page=1, per_page=1)
+            if test_result:
+                logger.info("✅ GraphQL API connection successful!")
+            else:
+                logger.warning("⚠️ GraphQL API test failed, but continuing anyway...")
+            
             self.application.run_polling(
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True
