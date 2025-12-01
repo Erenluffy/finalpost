@@ -1,4 +1,3 @@
-
 import logging
 import re
 import os
@@ -7,11 +6,13 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
+# WARNING: Hardcoding bot token in code is insecure!
+# Consider using environment variables for production
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
 
-GRAPHQL_API_URL = "https://animmes2uapi.vercel.app/api/graphql"
+GRAPHQL_API_URL = "https://graphql.anilist.co"  # Using official AniList GraphQL API
 
-ANILIST_IMG_CDN = "https://img.anili.st"
+ANILIST_IMG_CDN = "https://s4.anilist.co/file/anilistcdn"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -43,6 +44,7 @@ class AnimeFormatter:
 
         data = {k: (v.strip() if v else "") for k, v in match.groupdict().items()}
         return data
+    
     def extract_episode_count(self, episodes_text):
         """Extract episode count from text, handling various formats"""
         if not episodes_text:
@@ -59,6 +61,7 @@ class AnimeFormatter:
             return "—"
         
         return "—"
+    
     def convert_to_small_caps(self, text):
         """Convert text to small caps style for synopsis"""
         if not text:
@@ -102,8 +105,7 @@ class AnimeFormatter:
         # Convert to small caps
         return self.convert_to_small_caps(synopsis)
 
-
-   def format_html(self, data, cover_url=None, anime_id=None):
+    def format_html(self, data, cover_url=None, anime_id=None):
         title = data.get('title', 'Unknown Title')
         synopsis = self.truncate_synopsis(data.get('synopsis', ''))
         episodes = self.extract_episode_count(data.get('episodes', ''))
@@ -121,7 +123,7 @@ class AnimeFormatter:
         
         # If we have anime_id but no cover_url, generate one from AniList CDN
         if not cover_url and anime_id:
-            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
+            cover_url = f"{ANILIST_IMG_CDN}/media/anime/cover/medium/{anime_id}.jpg"
         
         return formatted_output, cover_url
 
@@ -200,7 +202,9 @@ class AnimeSearch:
               genres
               description
               siteUrl
-              # We only need the ID for cover image URL generation
+              coverImage {
+                medium
+              }
             }
           }
         }
@@ -251,7 +255,11 @@ class AnimeSearch:
             genres
             description
             siteUrl
-            # We only need the ID for cover image URL generation
+            coverImage {
+              medium
+              large
+              extraLarge
+            }
           }
         }
         """
@@ -513,44 +521,47 @@ Or simply send an anime title to search!"""
             parse_mode='HTML'
         )
 
-   # Update the _format_anime_from_api method in TelegramBot class:
-def _format_anime_from_api(self, anime, anime_id=None):
-    """Format anime data from API into the desired format"""
-    title = anime["title"]["english"] or anime["title"]["romaji"]
-    description = anime.get("description", "No synopsis available.")
-    description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
-    description = description.replace('\n', ' ').strip()
-    
-    episodes = str(anime.get("episodes", "—")) if anime.get("episodes") else "—"
+    def _format_anime_from_api(self, anime, anime_id=None):
+        """Format anime data from API into the desired format"""
+        title = anime["title"]["english"] or anime["title"]["romaji"]
+        description = anime.get("description", "No synopsis available.")
+        description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
+        description = description.replace('\n', ' ').strip()
+        
+        episodes = str(anime.get("episodes", "—")) if anime.get("episodes") else "—"
 
-    # Generate cover URL from AniList CDN
-    cover_url = None
-    if anime_id:
-        cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
+        # Get cover URL from API response
+        cover_url = None
+        if anime.get("coverImage"):
+            cover_url = anime["coverImage"].get("large") or anime["coverImage"].get("medium")
+        
+        # If no cover URL but have anime_id, generate one
+        if not cover_url and anime_id:
+            cover_url = f"{ANILIST_IMG_CDN}/media/anime/cover/large/{anime_id}.jpg"
     
-    # Use formatter to format
-    manual_format_text = f"""{title}
+        # Use formatter to format
+        manual_format_text = f"""{title}
 
-‣ Genres : Sample
-‣ Type : TV
-‣ Average Rating : 100
-‣ Status : Ongoing
-‣ First aired : Unknown
-‣ Last aired : Unknown
-‣ Runtime : 24 min
+‣ Genres : {', '.join(anime.get('genres', ['Sample']))}
+‣ Type : {anime.get('format', 'TV')}
+‣ Average Rating : {anime.get('averageScore', '100')}
+‣ Status : {anime.get('status', 'Unknown').replace('_', ' ')}
+‣ First aired : {self._format_date(anime.get('startDate', {}))}
+‣ Last aired : {self._format_date(anime.get('endDate', {}))}
+‣ Runtime : {anime.get('duration', '24')} min
 ‣ No of episodes : {episodes}
 
 ‣ Synopsis : {description}
 
 (Source: AniList)"""
 
-    anime_data = self.formatter.parse_anime_info(manual_format_text)
-    if anime_data:
-        return self.formatter.format_html(anime_data, cover_url, anime_id)
-    else:
-        # Fallback format
-        synopsis = self.formatter.truncate_synopsis(description)
-        return f"""<b>{title}</b>
+        anime_data = self.formatter.parse_anime_info(manual_format_text)
+        if anime_data:
+            return self.formatter.format_html(anime_data, cover_url, anime_id)
+        else:
+            # Fallback format
+            synopsis = self.formatter.truncate_synopsis(description)
+            return f"""<b>{title}</b>
 ────────────────────────
 <b>➤ Season :</b> <code>1</code>
 <b>➢ Audio :</b> <code>Jap • Eng • Hin • Tel • Tam</code>
@@ -559,14 +570,15 @@ def _format_anime_from_api(self, anime, anime_id=None):
 <blockquote expandable><b>➟ sʏɴᴏᴘsɪs :</b> <i>{synopsis}</i></blockquote>
 ────────────────────────
 💠 <b>Powered By</b> : @OtakusFlix""", cover_url
+
     def _format_date(self, date_dict):
         """Format date from API response"""
         if not date_dict or not date_dict.get("year"):
             return "Unknown"
 
         year = date_dict["year"]
-        month = date_dict.get("month", 1)
-        day = date_dict.get("day", 1)
+        month = date_dict.get("month", 1) or 1
+        day = date_dict.get("day", 1) or 1
 
         return f"{year}-{month:02d}-{day:02d}"
 
