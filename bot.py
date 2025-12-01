@@ -81,13 +81,13 @@ class AnimeFormatter:
         
         formatted_output = f"""<b>{data.get('title', 'Unknown Title')}</b>
 ────────────────────────
-<b>➤ Season :</b> 1
-<b>➤ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
-<b>➤ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
-<b>➤ Episodes :</b> {episodes}
-<blockquote expandable><b>‣ Synopsis :</b> {synopsis}</blockquote>
+<b>➤ Season :</b><code> 1</code>
+<b>➢ Audio :</b><code> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ</code>
+<b>➤ Quality :</b><code>  480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ</code>
+<b>➥ Episodes :</b><code> {episodes}</code>
+<blockquote expandable><b>‣ Synopsis :</b> <i>{synopsis}</i></blockquote>
 ────────────────────────
-<b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>"""
+<b>💠 Powered By :</b> <a href="https://t.me/OtakusFlix">OtakusFlix</a>"""
         
         # If we have anime_id but no cover_url, generate one from AniList CDN
         if not cover_url and anime_id:
