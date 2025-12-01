@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-#!/usr/bin/env python3
+
 import logging
 import re
 import os
@@ -8,16 +7,12 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# Bot credentials - get from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN", "7859842889:AAFSn3HZFBRe48MR9LnndoVrX4WCQeo2Ulg")
 
-# Your personal AniList GraphQL API endpoint
 GRAPHQL_API_URL = "https://animmes2uapi.vercel.app/api/graphql"
 
-# AniList image CDN for cover images
 ANILIST_IMG_CDN = "https://img.anili.st"
 
-# Logging configuration
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -28,15 +23,15 @@ class AnimeFormatter:
     def __init__(self):
         self.input_pattern = re.compile(
             r'(?P<title>.*?)\s*\n\s*\n?'
-            r'‣\s*Genres\s*:\s*(?P<genres>.*?)\s*\n'
-            r'‣\s*Type\s*:\s*(?P<type>.*?)\s*\n'
-            r'‣\s*Average Rating\s*:\s*(?P<rating>.*?)\s*\n'
-            r'‣\s*Status\s*:\s*(?P<status>.*?)\s*\n'
-            r'‣\s*First aired\s*:\s*(?P<first_aired>.*?)\s*\n'
-            r'‣\s*Last aired\s*:\s*(?P<last_aired>.*?)\s*\n'
-            r'‣\s*Runtime\s*:\s*(?P<runtime>.*?)\s*\n'
-            r'‣\s*No of episodes\s*:\s*(?P<episodes>.*?)\s*\n\s*\n?'
-            r'‣\s*Synopsis\s*:\s*(?P<synopsis>.*)',
+            r'[‣•]\s*Genres\s*:\s*(?P<genres>.*?)\s*\n'
+            r'[‣•]\s*Type\s*:\s*(?P<type>.*?)\s*\n'
+            r'[‣•]\s*Average Rating\s*:\s*(?P<rating>.*?)\s*\n'
+            r'[‣•]\s*Status\s*:\s*(?P<status>.*?)\s*\n'
+            r'[‣•]\s*First aired\s*:\s*(?P<first_aired>.*?)\s*\n'
+            r'[‣•]\s*Last aired\s*:\s*(?P<last_aired>.*?)\s*\n'
+            r'[‣•]\s*Runtime\s*:\s*(?P<runtime>.*?)\s*\n'
+            r'[‣•]\s*No of episodes\s*:\s*(?P<episodes>.*?)\s*\n\s*\n?'
+            r'[‣•]\s*Synopsis\s*:\s*(?P<synopsis>.*)',
             re.DOTALL | re.IGNORECASE
         )
 
@@ -48,46 +43,81 @@ class AnimeFormatter:
 
         data = {k: (v.strip() if v else "") for k, v in match.groupdict().items()}
         return data
+    def extract_episode_count(self, episodes_text):
+        """Extract episode count from text, handling various formats"""
+        if not episodes_text:
+            return "—"
+        
+        # Try to find numbers in the text
+        numbers = re.findall(r'\d+', episodes_text)
+        if numbers:
+            # Use the last number found (most likely the episode count)
+            return numbers[-1]
+        
+        # Check for common patterns
+        if re.search(r'\b(ongoing|airing|tba)\b', episodes_text, re.IGNORECASE):
+            return "—"
+        
+        return "—"
+    def convert_to_small_caps(self, text):
+        """Convert text to small caps style for synopsis"""
+        if not text:
+            return ""
+        
+        # Small caps mapping
+        small_caps_map = {
+            'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ',
+            'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ',
+            'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ',
+            's': 's', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
+            'y': 'ʏ', 'z': 'ᴢ',
+            'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ',
+            'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ',
+            'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ',
+            'S': 's', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
+            'Y': 'ʏ', 'Z': 'ᴢ'
+        }
+        
+        result = []
+        for char in text:
+            if char in small_caps_map:
+                result.append(small_caps_map[char])
+            else:
+                result.append(char)
+        
+        return ''.join(result)
 
-    def truncate_synopsis(self, synopsis, max_lines=5):
+    def truncate_synopsis(self, synopsis, max_chars=500):
+        """Truncate synopsis to fit in blockquote"""
         if not synopsis:
             return ""
-        synopsis = re.sub(r'\(Source:.*?\)', '', synopsis, flags=re.IGNORECASE | re.DOTALL).strip()
-        sentences = re.split(r'(?<=[.!?])\s+', synopsis)
-        result_lines = []
-        current_line = ""
-        max_chars_per_line = 70
-
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            if len(current_line + " " + sentence) > max_chars_per_line and current_line:
-                result_lines.append(current_line.strip())
-                current_line = sentence
-                if len(result_lines) >= max_lines:
-                    break
-            else:
-                current_line = current_line + " " + sentence if current_line else sentence
-
-        if current_line.strip() and len(result_lines) < max_lines:
-            result_lines.append(current_line.strip())
-
-        return " ".join(result_lines[:max_lines])
-
-    def format_html(self, data, cover_url=None, anime_id=None):
-        synopsis = self.truncate_synopsis(data.get('synopsis', ''))
-        episodes = re.sub(r'[^\d]', '', data.get('episodes', '0')) or "0"
         
-        formatted_output = f"""<b>{data.get('title', 'Unknown Title')}</b>
+        # Clean source references
+        synopsis = re.sub(r'\(Source:.*?\)', '', synopsis, flags=re.IGNORECASE | re.DOTALL).strip()
+        
+        # Truncate if too long
+        if len(synopsis) > max_chars:
+            synopsis = synopsis[:max_chars].rstrip() + "..."
+        
+        # Convert to small caps
+        return self.convert_to_small_caps(synopsis)
+
+
+   def format_html(self, data, cover_url=None, anime_id=None):
+        title = data.get('title', 'Unknown Title')
+        synopsis = self.truncate_synopsis(data.get('synopsis', ''))
+        episodes = self.extract_episode_count(data.get('episodes', ''))
+        
+        # Format with exact style requested
+        formatted_output = f"""<b>{title}</b>
 ────────────────────────
-<b>➤ Season :</b><code> 1</code>
-<b>➢ Audio :</b><code> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ</code>
-<b>➤ Quality :</b><code>  480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ</code>
-<b>➥ Episodes :</b><code> {episodes}</code>
-<blockquote expandable><b>‣ Synopsis :</b> <i>{synopsis}</i></blockquote>
+<b>➤ Season :</b> <code>1</code>
+<b>➢ Audio :</b> <code>Jap • Eng • Hin • Tel • Tam</code>
+<b>➤ Quality :</b><code> 480ᴘ • 720ᴘ • 1080ᴘ</code>
+<b>➥ Episodes :</b> {episodes}
+<blockquote expandable><b>➟ sʏɴᴏᴘsɪs :</b> <i>{synopsis}</i></blockquote>
 ────────────────────────
-<b>💠 Powered By :</b> <a href="https://t.me/OtakusFlix">OtakusFlix</a>"""
+💠 <b>Powered By</b> : @OtakusFlix"""
         
         # If we have anime_id but no cover_url, generate one from AniList CDN
         if not cover_url and anime_id:
@@ -324,14 +354,12 @@ Or simply send an anime title to search!"""
                 await update.message.reply_text("❌ Please enter at least 3 characters to search.")
                 return
 
-            # Search anime using GraphQL API
             result = self.anime_search.search_anime(query, page=1)
 
             if not result or not result.get("media"):
                 await update.message.reply_text("❌ No anime found with that name.")
                 return
 
-            # Store search session
             self.user_sessions[user_id] = {
                 "query": query,
                 "current_page": 1,
@@ -339,7 +367,6 @@ Or simply send an anime title to search!"""
                 "results": result["media"]
             }
 
-            # Create keyboard with results
             keyboard = self._create_search_keyboard(result["media"], user_id, 1, result["pageInfo"])
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -357,17 +384,14 @@ Or simply send an anime title to search!"""
         """Create inline keyboard for search results with pagination"""
         keyboard = []
 
-        # Add anime buttons
         for anime in results:
             title = anime["title"]["english"] or anime["title"]["romaji"]
             format_type = anime.get("format", "Unknown")
             label = f"{title} ({format_type})"
-            # Truncate if too long
             if len(label) > 50:
                 label = label[:47] + "..."
             keyboard.append([InlineKeyboardButton(label, callback_data=f"select_{anime['id']}")])
 
-        # Add pagination buttons
         pagination_row = []
         if current_page > 1:
             pagination_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"page_{user_id}_{current_page-1}"))
@@ -489,64 +513,52 @@ Or simply send an anime title to search!"""
             parse_mode='HTML'
         )
 
-    def _format_anime_from_api(self, anime, anime_id=None):
-        """Format anime data from API into the desired format"""
-        title = anime["title"]["english"] or anime["title"]["romaji"]
-        genres = ", ".join(anime.get("genres", [])) if anime.get("genres") else "Unknown"
-        anime_type = anime.get("format", "Unknown")
-        rating = f"{anime.get('averageScore', 'N/A')}%" if anime.get('averageScore') else "N/A"
-        status = anime.get("status", "Unknown").replace("_", " ").title()
+   # Update the _format_anime_from_api method in TelegramBot class:
+def _format_anime_from_api(self, anime, anime_id=None):
+    """Format anime data from API into the desired format"""
+    title = anime["title"]["english"] or anime["title"]["romaji"]
+    description = anime.get("description", "No synopsis available.")
+    description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
+    description = description.replace('\n', ' ').strip()
+    
+    episodes = str(anime.get("episodes", "—")) if anime.get("episodes") else "—"
 
-        # Format dates
-        start_date = self._format_date(anime.get("startDate", {}))
-        end_date = self._format_date(anime.get("endDate", {}))
+    # Generate cover URL from AniList CDN
+    cover_url = None
+    if anime_id:
+        cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
+    
+    # Use formatter to format
+    manual_format_text = f"""{title}
 
-        runtime = f"{anime.get('duration', 'Unknown')} min" if anime.get('duration') else "Unknown"
-        episodes = anime.get("episodes", "Unknown")
-
-        # Clean description
-        description = anime.get("description", "No synopsis available.")
-        description = re.sub(r'<.*?>', '', description)  # Remove HTML tags
-        description = description.replace('\n', ' ').strip()
-
-        # Generate cover URL from AniList CDN
-        cover_url = None
-        if anime_id:
-            cover_url = f"{ANILIST_IMG_CDN}/media/{anime_id}"
-        
-        # Use the existing formatter to format the final output
-        manual_format_text = f"""{title}
-
-‣ Genres : {genres}
-‣ Type : {anime_type}
-‣ Average Rating : {rating}
-‣ Status : {status}
-‣ First aired : {start_date}
-‣ Last aired : {end_date}
-‣ Runtime : {runtime}
+‣ Genres : Sample
+‣ Type : TV
+‣ Average Rating : 100
+‣ Status : Ongoing
+‣ First aired : Unknown
+‣ Last aired : Unknown
+‣ Runtime : 24 min
 ‣ No of episodes : {episodes}
 
 ‣ Synopsis : {description}
 
 (Source: AniList)"""
 
-        # Parse and format using existing formatter
-        anime_data = self.formatter.parse_anime_info(manual_format_text)
-        if anime_data:
-            return self.formatter.format_html(anime_data, cover_url, anime_id)
-        else:
-            # Fallback format
-            synopsis = self.formatter.truncate_synopsis(description)
-            return f"""<b>{title}</b>
+    anime_data = self.formatter.parse_anime_info(manual_format_text)
+    if anime_data:
+        return self.formatter.format_html(anime_data, cover_url, anime_id)
+    else:
+        # Fallback format
+        synopsis = self.formatter.truncate_synopsis(description)
+        return f"""<b>{title}</b>
 ────────────────────────
-<b>➤ Season :</b> 1
-<b>➢ Audio :</b> ᴊᴀᴘ | ᴇɴɢ | ᴛᴇʟ | ʜɪɴ | ᴛᴀᴍ
-<b>➤ Quality :</b> 480ᴘ | 720ᴘ | 1080ᴘ | 4ᴋ
+<b>➤ Season :</b> <code>1</code>
+<b>➢ Audio :</b> <code>Jap • Eng • Hin • Tel • Tam</code>
+<b>➤ Quality :</b><code> 480ᴘ • 720ᴘ • 1080ᴘ</code>
 <b>➥ Episodes :</b> {episodes}
-<blockquote expandable><b>‣ Synopsis :</b> {synopsis}</blockquote>
+<blockquote expandable><b>➟ sʏɴᴏᴘsɪs :</b> <i>{synopsis}</i></blockquote>
 ────────────────────────
-<b>💠 Powered By :</b> <a href="https://t.me/Animes2u">Animes2u</a>""", cover_url
-
+💠 <b>Powered By</b> : @OtakusFlix""", cover_url
     def _format_date(self, date_dict):
         """Format date from API response"""
         if not date_dict or not date_dict.get("year"):
